@@ -17,12 +17,14 @@ assume_releases_decreasing = true
 compare_commits = false
 # your Github access token; if possible use a new one with no additional rights set
 api_token = 'YOUR_GITHUB_ACCESS_TOKEN'
+# path to all the downloads, either relative to the script's parent, or absolute
+downloads_root = 'RELATIVE OR ABSOLUTE PATH'
 
 # you can query releases granularly by dividing them into groups
 # otherwise just define a single group
 [group.GROUPNAME]        # beware the name is case-sensitive: probably do lowercase
 # downloads get placed into this subfolder; groups can freely share folders
-folder = "RELATIVE PATH"
+folder = 'RELATIVE PATH'
 
 [[group.GROUPNAME.repos]]   # for each repo in this group
 id = "USER/REPONAME"        # obviously, its id

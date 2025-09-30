@@ -51,13 +51,13 @@ from time import sleep
 import tomllib
 from typing import Final, Literal, cast, final, TypedDict, overload
 
-from _toml_validation import toml_check, toml_check_get, toml_check_seq
-
 from github import Github, Auth  # pip install -U PyGithub
 from github.GitRelease import GitRelease
 from github.GithubException import UnknownObjectException
 from github.GitReleaseAsset import GitReleaseAsset
 import tomli_w  # pip install -U tomli-w
+
+from _toml_validation import toml_check, toml_check_get, toml_check_seq
 
 
 API_SLEEP_SEC: Final[float] = 0.005  # ≥0.005 worked last time
@@ -144,6 +144,7 @@ class Config:
     assume_releases_decreasing: bool
     compare_commits: bool
     api_token: str
+    downloads_root: Path
     groups: tuple[GroupSpec, ...]
 
     @staticmethod
@@ -155,11 +156,14 @@ class Config:
         if compare_commits is None:
             compare_commits = False
         api_token = toml_check_get(root, 'api_token', str, '')
+        dl_root = Path(toml_check_get(root, 'downloads_root', str | None, '') or '')
+        dl_root = (get_script_dir() / dl_root).resolve()
         group_data = toml_check_get(root, 'group', dict, '')
         return Config(
             assume_releases_decreasing=assume_rd,
             compare_commits=compare_commits,
             api_token=api_token,
+            downloads_root=dl_root,
             groups=GroupSpec.import_toml_many(group_data))
 
 
@@ -358,6 +362,8 @@ def main() -> None:
 
     # TODO make body multiline!!!! use pprint or something!
 
+    print(f'I will download into "{fspath(config.downloads_root)}"')
+
     picked_groups: Final = pick_groups(config.groups)
     if not picked_groups:
         print('Nothing selected. Bye!')
@@ -374,7 +380,7 @@ def main() -> None:
     if download_folders:
         print('Opening download folders...')
         for folder in download_folders:
-            startfile(get_script_dir() / folder)
+            startfile(config.downloads_root / folder)
 
 
 def pick_groups(groups: tuple[GroupSpec, ...]) -> tuple[GroupSpec, ...]:
@@ -401,7 +407,7 @@ def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec) -> 
     print(f'******* {repo.author} / {repo.name}')
     releases = work.releases(repo)
     if not releases:
-        print('  no (newer) releases found!')
+        print('  no newer releases found!')
         return False
     print(f'  newer releases: {len(releases)}')
 
@@ -453,7 +459,7 @@ def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec) -> 
     if not dl_assets:
         return False
 
-    DL_FOLDER: Final = get_script_dir() / group.folder
+    DL_FOLDER: Final = work.settings.config.downloads_root / group.folder
     DL_FOLDER.mkdir(exist_ok=True)
     downloaded_anything: bool = False
     for asset in dl_assets:
