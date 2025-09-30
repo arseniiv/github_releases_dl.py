@@ -35,7 +35,7 @@ id = "USER/REPONAME"        # obviously, its id
 matchers = [ 'REGEX1', 'REGEX2' ]
 ```
 
-The script then creates a file `github_releases_dl.cache.toml` to remember dates
+The script will create a file `github_releases_dl.cache.toml` to remember dates
 of the releases you downloaded.
 
 Don't forget you can specify several groups or release assets when asked, separated by spaces.
@@ -43,3 +43,23 @@ Inputting nothing will assume you want nothing. Inputting `*` will pick everythi
 
 There's no download progress bar right now, sorry. But if any downloads were made,
 corresponding folder windows will be opened for you.
+
+## Manual vs automatic mode
+
+When you run the script without arguments, it's executed in interactive mode
+where you're asked how many releases to list, which one to pick and
+which assets to download.
+
+It can also run in automatic mode:
+
+- `auto GROUP1 GROUP2...` — pick repos in groups `GROUP1`, `GROUP2`, ...
+- `auto *` — pick everything.
+
+In this mode, only the newest release (if there is any) is picked
+and *every* matched asset is downloaded, even when a matcher has
+multiple unplanned matches.
+(Because some users are likely to not care and not specify any,
+in which case it's fairly reasonable!)
+
+If any `GROUPn` is invalid, the script in automatic mode halts
+(useful to be sure no unintended action is done).

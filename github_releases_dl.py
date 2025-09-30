@@ -41,6 +41,7 @@ corresponding folder windows will be opened for you.
 """
 
 from __future__ import annotations
+import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache, cached_property
@@ -353,18 +354,57 @@ def input_int(prompt: str, range_: range, allow_n: bool = False) -> int | None:
     return result
 
 
+@dataclass(slots=True)  # `slots` allows us to check what arguments we recieve
+class CliArgs:
+    subcommand: Literal['auto', None] = None
+    groups: list[str] | None = None
+
+
+def define_arg_parser(config: Config) -> argparse.ArgumentParser:
+    group_ids_set = frozenset(g.id for g in config.groups)
+    def group(value: str) -> str:
+        if value in group_ids_set or value == '*':
+            return value
+        raise ValueError(f'not a group I recognize ({", ".join(group_ids_set)})')
+
+    parser = argparse.ArgumentParser(
+        description='Release downloader from Github repos',
+        allow_abbrev=False)
+    subparsers = parser.add_subparsers(
+        dest='subcommand',
+        title='subcommands', help='specify none to run in manual mode')
+    parser_auto = subparsers.add_parser(
+        'auto', help='automatically download newest releases of everything')
+    parser_auto.add_argument(
+        'groups', nargs='+', metavar='group', type=group,
+        help='repo groups to download from, or "*" to get everything')
+    return parser
+
+
 def main() -> None:
     work = Work()
     settings = Settings()
     work.settings = settings
     config = settings.config
     settings.connect_cache()
+    parser = define_arg_parser(config)
+
+    cli = parser.parse_args(namespace=CliArgs())
+    AUTO: Final[bool] = cli.subcommand == 'auto'
 
     # TODO make body multiline!!!! use pprint or something!
 
     print(f'I will download into "{fspath(config.downloads_root)}"')
-
-    picked_groups: Final = pick_groups(config.groups)
+    if AUTO:
+        assert cli.groups
+        if cli.groups == ['*']:
+            picked_groups = config.groups
+        else:
+            picked_groups = tuple(g for g in config.groups if g.id in cli.groups)
+            if '*' in cli.groups:
+                print('[* found among real group names and ignored]')
+    else:
+        picked_groups = pick_groups(config)
     if not picked_groups:
         print('Nothing selected. Bye!')
         return
@@ -373,7 +413,7 @@ def main() -> None:
     print()
     for group in picked_groups:
         for repo in group.repos:
-            if todo_refactor_process_repo(work, group, repo):
+            if todo_refactor_process_repo(work, group, repo, AUTO):
                 download_folders.add(group.folder)
             print()
 
@@ -383,8 +423,8 @@ def main() -> None:
             startfile(config.downloads_root / folder)
 
 
-def pick_groups(groups: tuple[GroupSpec, ...]) -> tuple[GroupSpec, ...]:
-    ids_defined = [g.id for g in groups]
+def pick_groups(config: Config) -> tuple[GroupSpec, ...]:
+    ids_defined = [g.id for g in config.groups]
     ids_defined_set = frozenset(ids_defined)
     print(f'Groups to search in:\n  {" ".join(ids_defined)}')
     incorrect = True
@@ -394,16 +434,17 @@ def pick_groups(groups: tuple[GroupSpec, ...]) -> tuple[GroupSpec, ...]:
         if not id_list:
             return ()
         if id_list == ['*']:
-            return groups
+            return config.groups
         incorrect = False
         for id_ in id_list:
             if not id_ in ids_defined_set:
                 incorrect = True
                 print(f'[unknown group: {id_}]')
-    return tuple(g for g in groups if g.id in frozenset(id_list))
+    return tuple(g for g in config.groups if g.id in frozenset(id_list))
 
 
-def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec) -> bool:
+def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec,
+                               auto_mode: bool) -> bool:
     print(f'******* {repo.author} / {repo.name}')
     releases = work.releases(repo)
     if not releases:
@@ -437,25 +478,35 @@ def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec) -> 
                 print(' NOTHING')
 
         if rel_idx != len(releases):
+            if auto_mode:
+                break
             answer = input('Show more releases? [y/N] ')
             if answer.strip().lower() != 'y':
                 break
         else:
             print('  ===== no more releases ====\n')
 
-    rel_idx = input_int('Choose a release index to download and remember? [or N] ',
-                        range(1, len(releases) + 1), allow_n=True)
-    if rel_idx is None:
-        return False
-    rel = releases[rel_idx - 1]
+    if auto_mode:
+        rel = releases[0]
+    else:
+        rel_idx = input_int('Choose a release index to download and remember? [or N] ',
+                            range(1, len(releases) + 1), allow_n=True)
+        if rel_idx is None:
+            return False
+        rel = releases[rel_idx - 1]
     work.mark_release(rel)
 
     if all(len(asset_group) <= 1 for asset_group in rel.matched_assets.values()):
-        print('[each regex matched <= 1 assets, ok to *]')
+        if not auto_mode:
+            print('[each regex matched <= 1 assets, ok to *]')
     else:
         print('[some regexes had multiple matches, beware!!]')
 
-    dl_assets = ask_for_assets(rel)
+    if auto_mode:
+        # everything!
+        dl_assets = [each for many in rel.matched_assets.values() for each in many]
+    else:
+        dl_assets = ask_for_assets(rel)
     if not dl_assets:
         return False
 
@@ -469,9 +520,7 @@ def todo_refactor_process_repo(work: Work, group: GroupSpec, repo: RepoSpec) -> 
 
 
 def ask_for_assets(rel: ReleaseData) -> list[GitReleaseAsset]:
-    flat_assets: list[GitReleaseAsset] = []
-    for assets in rel.matched_assets.values():
-        flat_assets += assets
+    flat_assets = [each for many in rel.matched_assets.values() for each in many]
     while True:
         answer = input('Enter asset indices to download, or * for everything: ')
         answer = answer.strip().lower()
@@ -512,4 +561,4 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print('Bye!')
+        print('\nBye!')
